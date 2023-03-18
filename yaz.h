@@ -61,7 +61,8 @@
 #include <string.h>
 #endif
 
-
+#include "../abet.h"
+//#include "tmp_abet.h"
 
 static const int YAZBUFLEN = 4096;
 static const int YAZTINYBUF = 32;
@@ -241,16 +242,15 @@ public:
     void setPcapDev(std::string &s) { m_pcap_dev = s; }
 #endif
 
-protected:
     virtual void prepCtrl() = 0;
     virtual void prepProbe() = 0;
     virtual void cleanup() = 0;
+    #if HAVE_PCAP_H
+        void prepPcap();
+        void unprepPcap();
+    #endif
 
-#if HAVE_PCAP_H
-    void prepPcap();
-    void unprepPcap();
-#endif
-
+protected:
     void measureSyscallOverhead();
     void measureMinSleep();
     void getClockTick();
@@ -287,14 +287,15 @@ protected:
 };
 
 
-class YazSender : public YazEndPt
+class YazSender : public ABSender,
+                  public YazEndPt
 {
 public:
     YazSender() : YazEndPt(), m_min_pkt_size(200), m_curr_pkt_size(1500), 
                   m_stream_length(50), m_target_spacing(MIN_SPACE), 
                   m_max_pkt_spacing(MAX_SPACE), m_nstreams(1),
                   m_inter_stream_spacing(20000), m_curr_stream(0),
-                  m_resolution(1000000.0)
+                  m_resolution(1000000.0), m_curr_estimation(0)
         {
             memset(&m_target_addr, 0, sizeof(struct in_addr));
             inet_pton(AF_INET, "127.0.0.1", &m_target_addr);
@@ -388,83 +389,38 @@ public:
     void setInitialSpacing(int &i) { m_target_spacing = i; }
     void setInitialPktSize(int &i) { m_curr_pkt_size = i; }
 
+    float get_current_estimation() const{
+        return m_curr_estimation;
+    }
+
+
+    int get_current_pkt_size() const{
+        return m_curr_pkt_size;
+    }
+
+
+    std::unique_ptr<ABSender> clone() const{
+        return std::make_unique<YazSender>(*this);
+    }
+
+
+    virtual void setupRun();
+    virtual void cleanup();
+    virtual void resetRound();
+    virtual bool doOneMeasurementRound(std::list<MeasurementBundle> *);
+    virtual bool processOneRoundRes(std::list<MeasurementBundle> *);
 protected:
     virtual void prepCtrl();
     virtual void prepProbe();
-    virtual void cleanup();
-
-private:
-    struct MeasurementBundle
-    {
-        MeasurementBundle() : m_local_app_mean(0), 
-                              m_local_pcap_mean(0), 
-                              m_remote_app_mean(0), 
-                              m_remote_pcap_mean(0), 
-                              m_local_ttl(0), m_remote_ttl(0),
-                              m_local_nsamples(0), m_local_nlost(0),
-                              m_remote_nsamples(0), m_remote_nlost(0)
-            {
-                timerclear(&m_start);
-                timerclear(&m_end);
-            }
-
-        bool operator==(const MeasurementBundle &mb)
-            {
-                return (this->m_start.tv_sec == mb.m_start.tv_sec &&
-                        this->m_start.tv_usec == mb.m_start.tv_usec);
-            }
-
-        bool operator<(const MeasurementBundle &mb)
-            {
-                return (timercmp(&this->m_start, &mb.m_start, <));
-            }
-
-        void reset()
-            {
-                timerclear(&m_start);
-                timerclear(&m_end);
-
-                m_local_app_mean =
-                    m_local_pcap_mean =
-                    m_remote_app_mean =
-                    m_remote_pcap_mean = 0.0;
-
-                m_local_ttl = m_remote_ttl = 0;
-
-                m_local_nsamples =
-                    m_local_nlost =
-                    m_remote_nsamples =
-                    m_remote_nlost = 0;
-            }
-
-        struct timeval m_start;
-        struct timeval m_end;
-
-        float m_local_app_mean;
-        float m_local_pcap_mean;
-
-        float m_remote_app_mean;
-        float m_remote_pcap_mean;
-
-        unsigned int m_local_ttl;
-        unsigned int m_remote_ttl;
-
-        unsigned int m_local_nsamples;
-        unsigned int m_local_nlost;
-        unsigned int m_remote_nsamples;
-        unsigned int m_remote_nlost;
-    };
-
-
-    bool collectRemote(MeasurementBundle &);
     bool resetRemote();
-    bool doOneMeasurementRound(std::list<MeasurementBundle> *);
+    bool collectRemote(MeasurementBundle &);
+    bool isPathSame(std::list<MeasurementBundle> *);
+    bool localSpacingConsistent(std::list<MeasurementBundle> *);
+    void coalesceMeasurements(std::list<MeasurementBundle> *, MeasurementBundle &);
     void sendStream();
     void sendProbe(char *, int, int, int);
-    bool localSpacingConsistent(std::list<MeasurementBundle> *);
-    bool isPathSame(std::list<MeasurementBundle> *);
-    void coalesceMeasurements(std::list<MeasurementBundle> *, MeasurementBundle &);
-
+    void sleepExponentially();
+private:
     struct in_addr m_target_addr;
     int m_min_pkt_size;
     int m_curr_pkt_size;
@@ -475,10 +431,17 @@ private:
     int m_inter_stream_spacing;
     int m_curr_stream;
     float m_resolution;
+
+    float m_curr_estimation;     // bytes/sec (?)
+    int _m_max_space;
+    int _m_fastest_local;
+    int _m_saved_pkt_size;
+    int _m_local_crawl;
 };
 
 
-class YazReceiver : public YazEndPt
+class YazReceiver : public ABReceiver,
+                    public YazEndPt
 {
 public:    
     YazReceiver(): YazEndPt() {}
@@ -521,6 +484,9 @@ public:
             return (rv);
         }
 
+    std::unique_ptr<ABReceiver> clone() const{
+        return std::make_unique<YazReceiver>(*this);
+    }
 protected:
     virtual void prepCtrl();
     virtual void prepProbe();

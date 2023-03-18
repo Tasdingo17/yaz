@@ -301,7 +301,7 @@ bool YazSender::doOneMeasurementRound(std::list<MeasurementBundle> *mb_list)
         {
             std::cout << "## pkts lost --- backing off: " << mb.m_remote_nlost << std::endl;
         }
-        else if (int(mb.m_remote_nsamples) < m_stream_length/2)
+        else if (int(mb.m_remote_nsamples) < m_stream_length / 2)
         {
             maxattempt--;
             std::cout << "## not enough samples from receiver: " << mb.m_remote_nsamples;
@@ -309,7 +309,7 @@ bool YazSender::doOneMeasurementRound(std::list<MeasurementBundle> *mb_list)
         }
 
         if (m_verbose > 1)
-            std::cout << "nsamples: " << mb.m_remote_nsamples << std::endl;
+            std::cout << "Yaz nsamples: " << mb.m_remote_nsamples << std::endl;
 
         MeasurementBundle bx = mb;
         mb_list->push_back(bx);
@@ -402,8 +402,7 @@ bool YazSender::localSpacingConsistent(std::list<MeasurementBundle> *mblist)
 }
 
 
-void YazSender::run()
-{
+void YazSender::setupRun(){
     char buffer[YAZTINYBUF];
     memset(&buffer, 0, YAZTINYBUF);
     inet_ntop(AF_INET, &m_target_addr, buffer, YAZTINYBUF-1);
@@ -414,168 +413,186 @@ void YazSender::run()
     m_pcap_filter_string = ostr.str(); 
 #endif
 
-    std::list<MeasurementBundle> *measurement_list = new std::list<MeasurementBundle>();
-
-    try
-    {
-        // setup control, probe, pcap
-        prepCtrl();
-        prepProbe();
+    // setup control, probe, pcap
+    prepCtrl();
+    prepProbe();
 #if HAVE_PCAP_H
-        prepPcap();
+    prepPcap();
 #endif
 
-        // send RST as a ping and to clean out any measurements from remote side
-        if (!resetRemote())
+    // send RST as a ping and to clean out any measurements from remote side
+    if (!resetRemote())
+    {
+        std::cerr << "!! error doing initial jig with remote.  bailing out. (restart receiver and try again.)" << std::endl;
+        throw -1;
+    }
+
+    _m_saved_pkt_size = m_curr_pkt_size;
+    _m_fastest_local = MAX_SPACE;
+    _m_max_space = std::max( int(float(m_min_pkt_size * 8) / m_resolution), MAX_SPACE);
+    std::cout << "## setting max_space to be " << _m_max_space << std::endl;
+    m_curr_estimation = 0.0;
+}
+
+
+void YazSender::sleepExponentially(){
+    int sleeptime = int(-1 * (m_inter_stream_spacing/1000) * log(1.0 - (random() / double(INT_MAX))));
+    usleep(sleeptime * 1000);
+}
+
+
+bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
+    bool done;
+    if (!isPathSame(mb_list)) {
+        std::cerr << "!! path length changed --- bailing out." << std::endl;
+        throw -1;
+    }
+
+    MeasurementBundle mb;
+    coalesceMeasurements(mb_list, mb);
+
+#if 0
+    if (fabs(mb.m_local_pcap_mean - float(m_target_spacing)) > 2.0)
+    {
+        std::cout << "## asked for " << m_target_spacing << " but got " << mb.m_local_pcap_mean << " -- retrying"  << std::endl;
+        local_forgiveness--;
+        continue;
+    }
+#endif
+
+    // given our current probe rate (mb.m_local_pcap_mean), what is range of compression
+    // or expansion that allows the rate to be within our target resolution (with
+    // a minimum of 2 microseconds, which only matters at rather fast probe rates.)
+    //
+    float curr_rate = ((m_curr_pkt_size * 8.0) / mb.m_local_pcap_mean) * 1000000;
+    float resol_spc = (m_curr_pkt_size * 8.0) / (curr_rate - m_resolution) * 1000000 - mb.m_local_pcap_mean;
+    float maxdiff = std::max(1.0f, resol_spc);
+    bool compexp =  
+        (fabs(mb.m_remote_pcap_mean - mb.m_local_pcap_mean) > maxdiff);
+
+    // force lower rate if there's packet loss
+    compexp = compexp || (mb.m_remote_nlost > 1);
+
+    if (!compexp && (m_curr_pkt_size == _m_saved_pkt_size))
+        _m_fastest_local = std::min(_m_fastest_local, int(mb.m_local_pcap_mean));
+
+    if (m_verbose)
+    {
+        std::cout << "## local spacing: " 
+                    << mb.m_local_pcap_mean << std::endl;
+        std::cout << "## remote spacing: " 
+                    << mb.m_remote_pcap_mean << std::endl;
+        std::cout << "## compexp: " << compexp << std::endl;
+
+        if (mb.m_remote_ttl && mb.m_local_ttl)
+            std::cout << "path length: " << (mb.m_local_ttl - mb.m_remote_ttl) << " hops" << std::endl;
+    }
+
+
+    if (compexp)
+    {
+        // even though our local spacing was consistent,
+        // it may not be the same as our target spacing.
+        // thus, there may indeed be stream compression or
+        // expansion.
+        if (m_target_spacing == mb.m_remote_pcap_mean)
         {
-            std::cerr << "!! error doing initial jig with remote.  bailing out. (restart receiver and try again.)" << std::endl;
-            throw -1;
+            m_target_spacing += 2;
+            _m_local_crawl--;
+        }
+        else
+        {
+            float diff = fabs(mb.m_remote_pcap_mean - mb.m_local_pcap_mean);
+            m_target_spacing = int(mb.m_local_pcap_mean + diff / 2);
         }
 
-        int saved_pkt_size = m_curr_pkt_size;
-        int fastest_local = MAX_SPACE;
-        int max_space = std::max( int(float(m_min_pkt_size * 8) / m_resolution), MAX_SPACE);
-        std::cout << "## setting max_space to be " << max_space << std::endl;
+        if (m_verbose)
+            std::cout << "new target: " << m_target_spacing << std::endl;
 
-        float current_estimate = 0.0;
+        if (m_target_spacing >= _m_max_space)
+        {
+            if (m_curr_pkt_size == m_min_pkt_size)
+            {
+                std::cout << "## avbw too low to accurately measure." << std::endl;
+                done = true;
+                m_curr_estimation = 0.0;
+            }
+
+            while (m_target_spacing > _m_max_space)
+            {
+                m_curr_pkt_size /= 2;
+                m_curr_pkt_size = std::max(m_curr_pkt_size, m_min_pkt_size);
+                std::cout << "## rate too high with current packet size.  cut packet size to: " << m_curr_pkt_size << std::endl;
+                m_target_spacing /= 2;
+            }
+        }
+    }
+    else
+    {   
+        m_curr_estimation = (float(m_curr_pkt_size) * 8.0 ) / (mb.m_local_pcap_mean / 1000000.0);
+        done = true;
+        if (m_verbose)
+            std::cout << "## done. setting current estimate to " << m_curr_estimation / 1000.0 << std::endl;
+
+#if 0 // needs fixing
+        if (abs(m_target_spacing - fastest_local) <= 2)
+            std::cout << "## available bandwidth too high to accurately measure." << std::endl;
+#endif
+    }
+
+    return done;
+
+}
+
+
+void YazSender::resetRound(){
+    m_target_spacing = MIN_SPACE;
+    m_curr_pkt_size = _m_saved_pkt_size;
+    _m_local_crawl = RETRY_LIMIT;
+}
+
+
+void YazSender::run()
+{
+    std::list<MeasurementBundle> *measurement_list = new std::list<MeasurementBundle>();
+    try
+    {
+        setupRun();
         int runnum = 1;
 
         do // until doomsday
         {
             struct timeval tvbegin;
             gettimeofday(&tvbegin, 0);
+            measurement_list->clear();
      
+            resetRound();
+            /* moved to resetRound
             m_target_spacing = MIN_SPACE;
-            m_curr_pkt_size = saved_pkt_size;
+            m_curr_pkt_size = _m_saved_pkt_size;
+            _m_local_crawl = RETRY_LIMIT;
+            */
+            bool done = false;
 
             if (m_verbose) 
                 std::cout << "## starting sample " << runnum << std::endl;
-
             if (m_verbose > 1) 
                 std::cout << "## sample " << runnum << ", initial spacing:" << m_target_spacing << std::endl;
-
-
-            measurement_list->clear();
-
-            bool done = false;
-            int local_crawl = RETRY_LIMIT;
 #if 0
             int local_forgiveness = RETRY_LIMIT;
             while (!done && local_crawl && local_forgiveness)
 #endif
-            while (!done && local_crawl)
+            while (!done && _m_local_crawl)
             {
-                if (!doOneMeasurementRound(measurement_list))
-                {
+                if (!doOneMeasurementRound(measurement_list)){
                     std::cerr << "!! persistent error collecting measurements from receiver" << std::endl;
                     throw -1;
                 }
+                done = processOneRoundRes(measurement_list);
 
-                if (!isPathSame(measurement_list))
-                {
-                    std::cerr << "!! path length changed --- bailing out." << std::endl;
-                    throw -1;
+                if (!done){
+                    sleepExponentially();   // retry
                 }
-
-                MeasurementBundle mb;
-                coalesceMeasurements(measurement_list, mb);
-
-#if 0
-                if (fabs(mb.m_local_pcap_mean - float(m_target_spacing)) > 2.0)
-                {
-                    std::cout << "## asked for " << m_target_spacing << " but got " << mb.m_local_pcap_mean << " -- retrying"  << std::endl;
-                    local_forgiveness--;
-                    continue;
-                }
-#endif
-
-                measurement_list->clear();
-
-
-                //
-                // given our current probe rate (mb.m_local_pcap_mean), what is range of compression
-                // or expansion that allows the rate to be within our target resolution (with
-                // a minimum of 2 microseconds, which only matters at rather fast probe rates.)
-                //
-                float curr_rate = ((m_curr_pkt_size * 8.0) / mb.m_local_pcap_mean) * 1000000;
-                float resol_spc = (m_curr_pkt_size * 8.0) / (curr_rate - m_resolution) * 1000000 - mb.m_local_pcap_mean;
-                float maxdiff = std::max(1.0f, resol_spc);
-                bool compexp =  
-                    (fabs(mb.m_remote_pcap_mean - mb.m_local_pcap_mean) > maxdiff);
-
-                // force lower rate if there's packet loss
-                compexp = compexp || (mb.m_remote_nlost > 1);
-
-                if (!compexp && (m_curr_pkt_size == saved_pkt_size))
-                    fastest_local = std::min(fastest_local, int(mb.m_local_pcap_mean));
-
-                if (m_verbose)
-                {
-                    std::cout << "## local spacing: " 
-                              << mb.m_local_pcap_mean << std::endl;
-                    std::cout << "## remote spacing: " 
-                              << mb.m_remote_pcap_mean << std::endl;
-                    std::cout << "## compexp: " << compexp << std::endl;
-
-                    if (mb.m_remote_ttl && mb.m_local_ttl)
-                        std::cout << "path length: " << (mb.m_local_ttl - mb.m_remote_ttl) << " hops" << std::endl;
-                }
-
-
-                if (compexp)
-                {
-                    // even though our local spacing was consistent,
-                    // it may not be the same as our target spacing.
-                    // thus, there may indeed be stream compression or
-                    // expansion.
-                    if (m_target_spacing == mb.m_remote_pcap_mean)
-                    {
-                        m_target_spacing += 2;
-                        local_crawl--;
-                    }
-                    else
-                    {
-                        float diff = fabs(mb.m_remote_pcap_mean - mb.m_local_pcap_mean);
-                        m_target_spacing = int(mb.m_local_pcap_mean + diff / 2);
-                    }
-
-                    if (m_verbose)
-                        std::cout << "new target: " << m_target_spacing << std::endl;
-
-                    if (m_target_spacing >= max_space)
-                    {
-                        if (m_curr_pkt_size == m_min_pkt_size)
-                        {
-                            std::cout << "## avbw too low to accurately measure." << std::endl;
-                            done = true;
-                            current_estimate = 0.0;
-                        }
-
-                        while (m_target_spacing > max_space)
-                        {
-                            m_curr_pkt_size /= 2;
-                            m_curr_pkt_size = std::max(m_curr_pkt_size, m_min_pkt_size);
-                            std::cout << "## rate too high with current packet size.  cut packet size to: " << m_curr_pkt_size << std::endl;
-                            m_target_spacing /= 2;
-                        }
-                    }
-                }
-                else
-                {   
-                    current_estimate = (float(m_curr_pkt_size) * 8.0 ) / (mb.m_local_pcap_mean / 1000000.0);
-                    done = true;
-                    if (m_verbose)
-                        std::cout << "## done. setting current estimate to " << current_estimate/1000.0 << std::endl;
-
-#if 0 // needs fixing
-                    if (abs(m_target_spacing - fastest_local) <= 2)
-                        std::cout << "## available bandwidth too high to accurately measure." << std::endl;
-#endif
-                }
-
-                // set sleep time to be exponentially distributed 
-                int sleeptime = int(-1 * (m_inter_stream_spacing/1000) * log(1.0 - (random() / double(INT_MAX))));
-                usleep(sleeptime * 1000);
             }
         
             struct timeval tvend;
@@ -590,19 +607,14 @@ void YazSender::run()
                       << tvend.tv_usec << " "
                       << std::setprecision(0)
                       << std::fixed
-                      << current_estimate/1000.0 << std::endl;
+                      << m_curr_estimation / 1000.0 << std::endl;
 
             runnum++;
-
-            current_estimate = 0.0;
-
-            // set sleep time to be exponentially distributed 
-            int sleeptime = int(-1 * (m_inter_stream_spacing/100) * log(1.0 - (random() / double(INT_MAX))));
-            usleep(sleeptime * 1000);
+            m_curr_estimation = 0.0;
+            sleepExponentially();   // inter-stream sleep
         }  while (1);
     }
-    catch (...)
-    {
+    catch (...){
         std::cerr << "!! yaz sender exiting" << std::endl;
         cleanup();
     }
