@@ -440,7 +440,7 @@ void YazSender::sleepExponentially(){
     usleep(sleeptime * 1000);
 }
 
-
+// clears mb_list
 bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
     bool done;
     if (!isPathSame(mb_list)) {
@@ -540,6 +540,7 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
 #endif
     }
 
+    mb_list->clear();
     return done;
 
 }
