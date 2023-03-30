@@ -106,6 +106,48 @@ bool YazSender::resetRemote()
 }
 
 
+void print_delay_vec(const std::vector<timeval>& delay_vec){
+    for (int i = 0; i < delay_vec.size(); i++){
+        std::cout << '(' << i << ';' << delay_vec[i].tv_sec << 's' << delay_vec[i].tv_usec / 1000.0 << "ms); ";
+    }
+    std::cout << std::endl;
+}
+
+
+// Assumes clock synchronized
+std::vector<timeval> YazSender::make_delays_vec(const std::vector<ProbeStamp>& remote_probes){
+    std::vector<timeval> res;
+    res.reserve(m_app_probes.size());
+    struct timeval diff;
+    int j = 0;
+
+    for (int i = 0; i < remote_probes.size(); i++, j++) { // assume that remote_probes.size() <= m_app_probes.size()
+        while (j < m_app_probes.size() && 
+               remote_probes[i].m_sequence != m_app_probes[j].m_sequence)
+        {  // something is lost (no reordering!)
+            //std::cout << "remote seq_n: " << remote_probes[i].m_sequence << "; local seq_n: ";
+            //std::cout << m_app_probes[j].m_sequence << std::endl;
+            j += 1;
+            diff.tv_sec = -1;
+            diff.tv_usec = 0;
+            res.push_back(diff);
+        }
+        timersub(&(remote_probes[i].m_ts), &(m_app_probes[i].m_ts), &diff);
+        res.push_back(diff);
+    }
+
+    // if dropped last packets
+    for (; j < m_app_probes.size(); j++){
+        diff.tv_sec = -1;
+        diff.tv_usec = 0;
+        res.push_back(diff);
+    }
+
+    return res;
+}
+
+
+// After collectRemote we have m_app_probes clear (and processed)
 bool YazSender::collectRemote(MeasurementBundle &mb)
 {
     // send RST message, get RST-ACK back along with mean spacings (and TTL).
@@ -113,6 +155,7 @@ bool YazSender::collectRemote(MeasurementBundle &mb)
     YazCtrlMsg pmsg;
     pmsg.m_code = htonl(PCTRL_RST);
     pmsg.m_len = 0;
+    pmsg.m_ps_vec_len = 0;
     pmsg.m_seq = htonl(m_ctrl_seq);
     pmsg.m_reason = 0;
 
@@ -177,6 +220,7 @@ bool YazSender::collectRemote(MeasurementBundle &mb)
             assert (ntohl(pmsg.m_seq) == (unsigned int)(m_ctrl_seq));
             assert (ntohl(pmsg.m_reason) == 0); // FIXME
 
+            // receive YazRstResponse
             remain = ntohl(pmsg.m_len);
             YazRstResponse *yrr = new YazRstResponse();
             char *buffer = (char *)yrr;
@@ -192,6 +236,34 @@ bool YazSender::collectRemote(MeasurementBundle &mb)
 
                 remain -= n;
                 offset += n;
+            }
+
+            // receive std::vector<ProbeStamp> for delays
+            int remain_ps_vec = ntohl(pmsg.m_ps_vec_len);
+            remain = remain_ps_vec;
+            buffer = new char[remain];
+            offset = 0;
+            while (remain > 0)
+            {
+                int n = recv(m_ctrl_sd, buffer+offset, remain, 0);
+                if (n <= 0)
+                {
+                    std::cerr << "!!error on recv() for PsVec: " << errno << '/' << strerror(errno) << std::endl;
+                    return false;
+                }
+
+                remain -= n;
+                offset += n;
+            }
+            if (remain_ps_vec > 0){
+                PsVec::SendProbeStampVec sps_vec;
+                sps_vec.ParseFromString(std::string(buffer));
+                std::vector<ProbeStamp> ps_vec = std::move(deserialize_psvec(sps_vec));
+                mb.m_delays_vec = std::move(make_delays_vec(ps_vec));
+                if (m_verbose > 1 && m_app_probes.size() != ps_vec.size()){
+                    std::cout << "Lost packets!:" << std::endl;
+                    print_delay_vec(mb.m_delays_vec);
+                }                
             }
 
             mb.m_remote_app_mean = float(ntohl(yrr->m_app_mean));
@@ -541,6 +613,10 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
     }
 
     mb_list->clear();
+    if (_m_local_crawl <= 0){
+        done = true; // force stop
+    }
+
     return done;
 
 }
@@ -611,7 +687,7 @@ void YazSender::run()
                       << m_curr_estimation / 1000.0 << std::endl;
 
             runnum++;
-            m_curr_estimation = 0.0;
+            m_curr_estimation = 0.0; // mb something else
             sleepExponentially();   // inter-stream sleep
         }  while (1);
     }
@@ -644,7 +720,7 @@ void YazSender::sendProbe(char *buffer, int paylen, int stream, int seq)
     }
 }
 
-
+// After sendStream we have m_app_probes filled
 void YazSender::sendStream()
 {
     // m_target_spacing is intended pkt spacing, in microseconds

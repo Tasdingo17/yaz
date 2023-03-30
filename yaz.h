@@ -63,6 +63,7 @@
 
 #include "../abet.h"
 //#include "tmp_abet.h"
+#include "PsVec.pb.h"
 
 static const int YAZBUFLEN = 4096;
 static const int YAZTINYBUF = 32;
@@ -122,12 +123,13 @@ const int pcap_wait_timeout = 5000;    // milliseconds (long!)
 
 struct YazCtrlMsg
 {
-    YazCtrlMsg(): m_code(PCTRL_INVALID), m_seq(0), m_len(0), m_reason(0) {}
+    YazCtrlMsg(): m_code(PCTRL_INVALID), m_seq(0), m_len(0), m_reason(0), m_ps_vec_len(0) {}
 
     int m_code;
     int m_seq;
     int m_len;
     int m_reason;
+    int m_ps_vec_len;
 };
 
 
@@ -420,6 +422,7 @@ protected:
     void sendStream();
     void sendProbe(char *, int, int, int);
     void sleepExponentially();
+    std::vector<timeval> make_delays_vec(const std::vector<ProbeStamp>&);
 private:
     struct in_addr m_target_addr;
     int m_min_pkt_size;
@@ -498,5 +501,8 @@ private:
     void processProbe();
 };
 
+
+PsVec::SendProbeStampVec serialize_psvec(const std::vector<ProbeStamp>& ps_vec);
+std::vector<ProbeStamp> deserialize_psvec(const PsVec::SendProbeStampVec& ps_vec);
 
 #endif // __YAZ_H__

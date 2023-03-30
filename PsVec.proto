@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package PsVec;
+import "google/protobuf/timestamp.proto";
+
+message SendProbeStamp{
+    uint32 m_stream = 1;
+    uint32 m_sequence = 2;
+    uint32 m_ttl = 3;
+    google.protobuf.Timestamp m_tv = 4;
+}
+
+message SendProbeStampVec{
+    repeated SendProbeStamp m_app_probes_ptr = 1;
+}

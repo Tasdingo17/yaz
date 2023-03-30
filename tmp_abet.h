@@ -1,4 +1,4 @@
-// TMP file for yaz consistency (origin used by ChEst)
+// File for available bandwidht estimator base class.
 
 #ifndef __ABET_H__
 #define __ABET_H__
@@ -6,6 +6,7 @@
 #include <memory>
 #include <sys/time.h>
 #include <list>
+#include <vector>
 
 struct MeasurementBundle;
 
@@ -75,6 +76,8 @@ struct MeasurementBundle
                 m_local_nlost =
                 m_remote_nsamples =
                 m_remote_nlost = 0;
+
+            m_delays_vec.clear();
         }
 
     struct timeval m_start;
@@ -93,6 +96,8 @@ struct MeasurementBundle
     unsigned int m_local_nlost;
     unsigned int m_remote_nsamples;
     unsigned int m_remote_nlost;
+
+    std::vector<timeval> m_delays_vec;
 };
 
 

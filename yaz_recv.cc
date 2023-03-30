@@ -244,12 +244,23 @@ void YazReceiver::run()
 }
 
 
+void show_app_probes(const std::vector<ProbeStamp>& app_probes){
+    std::cout << "!!App probes:" << std::endl;
+    for (const auto& ps: app_probes){
+        std::cout << ps.m_sequence << " ";
+    }
+    std::cout << std::endl;
+    return;
+}
+
+
 void YazReceiver::processControlMessage(int sd, bool &connected)
 {
     YazCtrlMsg pmsg;
     char *buffer = 0;
     YazRstResponse *yrr = 0;
 
+    std::string sps_vec_str = serialize_psvec(m_app_probes).SerializeAsString();  // serialized
     int remain = sizeof(YazCtrlMsg);
     int offset = 0; 
     while (remain > 0)
@@ -290,6 +301,7 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
             buffer = (char *)yrr;
 
             pmsg.m_len = htonl(sizeof(YazRstResponse));
+            pmsg.m_ps_vec_len = htonl(sps_vec_str.length());    // mb troubles with null-terminator
             pmsg.m_code = htonl(PCTRL_RST_ACK);
             pmsg.m_reason = 0;  // FIXME
 
@@ -298,6 +310,9 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
             int nlost = 0;
 
             bool valid_measurement = getSpacing(&m_app_probes, mean, nsamp, nlost);
+            //if (nlost != 0){
+            //    show_app_probes(m_app_probes);
+            //}
             yrr->m_app_mean = htonl((unsigned int)(mean));
             yrr->m_nsamples = htonl(nsamp);
             yrr->m_nlost = htonl(nlost);
@@ -307,7 +322,6 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
 #if HAVE_PCAP_H
             size_t napp_probes = m_app_probes.size();
 #endif
-            m_app_probes.clear();
 
 #if HAVE_PCAP_H
             if (m_using_pcap)
@@ -398,8 +412,24 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
         offset += n;
     }
 
+    // send m_app_probes;
+    remain = sps_vec_str.length();
+    offset = 0;
+    while (remain)
+    {
+        int n = send(sd, sps_vec_str.c_str()+offset, remain, 0);
+        if (n <= 0)
+        {
+            std::cerr << "!!error on send() of m_app_probes: " << errno << '/' << strerror(errno) << std::endl;
+            throw -1;
+        }
+
+        remain -= n;
+        offset += n;
+    }
     if (buffer)
         delete [] buffer;
+    m_app_probes.clear();   // mb also clear protobuf things
 
     m_ctrl_seq++;
 }

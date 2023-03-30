@@ -440,3 +440,44 @@ void YazEndPt::getClockTick()
         std::cout << "## clock tick (HZ): " << m_clock_tick << std::endl;
 }
 
+
+// ProbeStamp to SendProbeStamp
+void ps_to_sps(const ProbeStamp& ps, PsVec::SendProbeStamp& sps){
+    sps.set_m_sequence(ps.m_sequence);
+    sps.set_m_stream(ps.m_stream);
+    sps.set_m_ttl(ps.m_ttl);
+
+    google::protobuf::Timestamp* stv = new google::protobuf::Timestamp;
+    stv->set_seconds(ps.m_ts.tv_sec);
+    stv->set_nanos(ps.m_ts.tv_usec);
+    sps.set_allocated_m_tv(stv);
+}
+
+// SendProbeStamp to ProbeStamp
+void sps_to_ps(const PsVec::SendProbeStamp& sps, ProbeStamp& ps){
+    ps.m_sequence = sps.m_sequence();
+    ps.m_stream = sps.m_stream();
+    ps.m_ttl = sps.m_ttl();
+    ps.m_ts.tv_sec = sps.m_tv().seconds();
+    ps.m_ts.tv_usec = sps.m_tv().nanos();
+}
+
+
+PsVec::SendProbeStampVec serialize_psvec(const std::vector<ProbeStamp>& ps_vec){
+    PsVec::SendProbeStampVec res;
+    for (const auto& ps : ps_vec){
+        auto sps = res.add_m_app_probes_ptr();
+        ps_to_sps(ps, *sps);
+    }
+    return res;
+}
+
+std::vector<ProbeStamp> deserialize_psvec(const PsVec::SendProbeStampVec& sps_vec){
+    std::vector<ProbeStamp> res;
+    for(int i=0; i < sps_vec.m_app_probes_ptr_size(); i++){
+        ProbeStamp ps;
+        sps_to_ps(sps_vec.m_app_probes_ptr(i), ps);
+        res.emplace_back(ps);
+    }
+    return res;
+}
