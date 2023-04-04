@@ -262,7 +262,8 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
 
     std::string sps_vec_str = serialize_psvec(m_app_probes).SerializeAsString();  // serialized
     int remain = sizeof(YazCtrlMsg);
-    int offset = 0; 
+    int offset = 0;
+    bool valid_measurement = false;
     while (remain > 0)
     {
         int n = recv(sd, ((char*)&pmsg)+offset, remain, 0);
@@ -309,7 +310,7 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
             int nsamp = 0;
             int nlost = 0;
 
-            bool valid_measurement = getSpacing(&m_app_probes, mean, nsamp, nlost);
+            valid_measurement = getSpacing(&m_app_probes, mean, nsamp, nlost);
             //if (nlost != 0){
             //    show_app_probes(m_app_probes);
             //}
@@ -364,6 +365,7 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
                     std::cout << "##bad measurement - sending NACK probe sender" << std::endl;
                 pmsg.m_code = htonl(PCTRL_RST_NACK);
                 pmsg.m_len = 0;
+                pmsg.m_ps_vec_len = 0;
 
                 delete (yrr);
                 yrr = 0;
@@ -397,35 +399,37 @@ void YazReceiver::processControlMessage(int sd, bool &connected)
         offset += n;
     }
 
-    remain = ntohl(pmsg.m_len);
-    offset = 0;
-    while (remain)
-    {
-        int n = send(sd, buffer+offset, remain, 0);
-        if (n <= 0)
+    if (valid_measurement){
+        remain = ntohl(pmsg.m_len);
+        offset = 0;
+        while (remain)
         {
-            std::cerr << "!!error on send() of control payload: " << errno << '/' << strerror(errno) << std::endl;
-            throw -1;
+            int n = send(sd, buffer+offset, remain, 0);
+            if (n <= 0)
+            {
+                std::cerr << "!!error on send() of control payload: " << errno << '/' << strerror(errno) << std::endl;
+                throw -1;
+            }
+
+            remain -= n;
+            offset += n;
         }
 
-        remain -= n;
-        offset += n;
-    }
-
-    // send m_app_probes;
-    remain = sps_vec_str.length();
-    offset = 0;
-    while (remain)
-    {
-        int n = send(sd, sps_vec_str.c_str()+offset, remain, 0);
-        if (n <= 0)
+        // send m_app_probes;
+        remain = sps_vec_str.length();
+        offset = 0;
+        while (remain)
         {
-            std::cerr << "!!error on send() of m_app_probes: " << errno << '/' << strerror(errno) << std::endl;
-            throw -1;
-        }
+            int n = send(sd, sps_vec_str.c_str()+offset, remain, 0);
+            if (n <= 0)
+            {
+                std::cerr << "!!error on send() of m_app_probes: " << errno << '/' << strerror(errno) << std::endl;
+                throw -1;
+            }
 
-        remain -= n;
-        offset += n;
+            remain -= n;
+            offset += n;
+        }
     }
     if (buffer)
         delete [] buffer;

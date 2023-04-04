@@ -147,6 +147,16 @@ std::vector<timeval> YazSender::make_delays_vec(const std::vector<ProbeStamp>& r
 }
 
 
+std::vector<timeval> get_send_time(const std::vector<ProbeStamp>& ps_vec){
+    std::vector<timeval> res;
+    res.reserve(ps_vec.size());
+    for (const auto& elem: ps_vec){
+        res.push_back(elem.m_ts);
+    }
+    return res;
+}
+
+
 // After collectRemote we have m_app_probes clear (and processed)
 bool YazSender::collectRemote(MeasurementBundle &mb)
 {
@@ -241,7 +251,9 @@ bool YazSender::collectRemote(MeasurementBundle &mb)
             // receive std::vector<ProbeStamp> for delays
             int remain_ps_vec = ntohl(pmsg.m_ps_vec_len);
             remain = remain_ps_vec;
-            buffer = new char[remain];
+            if (remain > 0){
+                buffer = new char[remain];
+            }
             offset = 0;
             while (remain > 0)
             {
@@ -265,6 +277,7 @@ bool YazSender::collectRemote(MeasurementBundle &mb)
                     print_delay_vec(mb.m_delays_vec);
                 }                
             }
+            //mb.m_send_time = std::move(get_send_time(m_app_probes));
 
             mb.m_remote_app_mean = float(ntohl(yrr->m_app_mean));
             mb.m_remote_pcap_mean = float(ntohl(yrr->m_pcap_mean));
@@ -341,6 +354,9 @@ bool YazSender::collectRemote(MeasurementBundle &mb)
         }
     }
 
+    if (!valid_measurement){
+        mb.reset();
+    }
     return (success && valid_measurement);
 }
 
@@ -369,14 +385,16 @@ bool YazSender::doOneMeasurementRound(std::list<MeasurementBundle> *mb_list)
             continue;
         }
 
-        if (int(mb.m_remote_nlost) > 1)
+        if (int(mb.m_remote_nlost) > 1 && m_verbose)
         {
             std::cout << "## pkts lost --- backing off: " << mb.m_remote_nlost << std::endl;
         }
         else if (int(mb.m_remote_nsamples) < m_stream_length / 2)
         {
             maxattempt--;
-            std::cout << "## not enough samples from receiver: " << mb.m_remote_nsamples;
+            if (m_verbose){
+                std::cout << "## not enough samples from receiver: " << mb.m_remote_nsamples;
+            }
             continue;
         }
 
@@ -594,7 +612,9 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
             {
                 m_curr_pkt_size /= 2;
                 m_curr_pkt_size = std::max(m_curr_pkt_size, m_min_pkt_size);
-                std::cout << "## rate too high with current packet size.  cut packet size to: " << m_curr_pkt_size << std::endl;
+                if (m_verbose){
+                    std::cout << "## rate too high with current packet size.  cut packet size to: " << m_curr_pkt_size << std::endl;
+                }
                 m_target_spacing /= 2;
             }
         }
