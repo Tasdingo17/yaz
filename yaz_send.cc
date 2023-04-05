@@ -634,6 +634,7 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
 
     mb_list->clear();
     if (_m_local_crawl <= 0){
+        m_curr_estimation = curr_rate;
         done = true; // force stop
     }
 
