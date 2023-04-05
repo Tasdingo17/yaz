@@ -232,6 +232,9 @@ public:
             delete m_pcap_thread;
             delete m_running;
 #endif
+            close(m_ctrl_sd);
+            close(m_probe_sd);
+            m_app_probes.clear();
         }
  
     virtual void run() = 0;
@@ -302,7 +305,7 @@ public:
             memset(&m_target_addr, 0, sizeof(struct in_addr));
             inet_pton(AF_INET, "127.0.0.1", &m_target_addr);
         }
-    virtual ~YazSender() {}
+    //virtual ~YazSender() {}
 
     virtual void run();
 
@@ -448,7 +451,7 @@ class YazReceiver : public ABReceiver,
 {
 public:    
     YazReceiver(): YazEndPt() {}
-    virtual ~YazReceiver() {}
+    //virtual ~YazReceiver() {}
 
     virtual void run();
 
