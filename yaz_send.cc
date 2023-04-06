@@ -119,6 +119,7 @@ std::vector<timeval> YazSender::make_delays_vec(const std::vector<ProbeStamp>& r
     std::vector<timeval> res;
     res.reserve(m_app_probes.size());
     struct timeval diff;
+    struct timeval zero = {0, 0};
     int j = 0;
 
     for (int i = 0; i < remote_probes.size(); i++, j++) { // assume that remote_probes.size() <= m_app_probes.size()
@@ -133,6 +134,10 @@ std::vector<timeval> YazSender::make_delays_vec(const std::vector<ProbeStamp>& r
             res.push_back(diff);
         }
         timersub(&(remote_probes[i].m_ts), &(m_app_probes[i].m_ts), &diff);
+        if (timercmp(&diff, &zero, <)){ // clock problems...
+            diff.tv_sec = -1;
+            diff.tv_usec = 0;
+        }
         res.push_back(diff);
     }
 
