@@ -545,7 +545,7 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
 
     MeasurementBundle mb;
     coalesceMeasurements(mb_list, mb);
-
+    m_traffic_generated += mb.m_local_nsamples * m_curr_pkt_size * 8;
 #if 0
     if (fabs(mb.m_local_pcap_mean - float(m_target_spacing)) > 2.0)
     {
@@ -571,7 +571,7 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
     if (!compexp && (m_curr_pkt_size == _m_saved_pkt_size))
         _m_fastest_local = std::min(_m_fastest_local, int(mb.m_local_pcap_mean));
 
-    if (m_verbose)
+    if (m_verbose > 1)
     {
         std::cout << "## local spacing: " 
                     << mb.m_local_pcap_mean << std::endl;
@@ -593,15 +593,16 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
         if (m_target_spacing == mb.m_remote_pcap_mean)
         {
             m_target_spacing += 2;
-            _m_local_crawl--;
+            //_m_local_crawl--;
         }
         else
         {
             float diff = fabs(mb.m_remote_pcap_mean - mb.m_local_pcap_mean);
             m_target_spacing = int(mb.m_local_pcap_mean + diff / 2);
         }
+        _m_local_crawl--;
 
-        if (m_verbose)
+        if (m_verbose > 2)
             std::cout << "new target: " << m_target_spacing << std::endl;
 
         if (m_target_spacing >= _m_max_space)
@@ -617,7 +618,7 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
             {
                 m_curr_pkt_size /= 2;
                 m_curr_pkt_size = std::max(m_curr_pkt_size, m_min_pkt_size);
-                if (m_verbose){
+                if (m_verbose > 1){
                     std::cout << "## rate too high with current packet size.  cut packet size to: " << m_curr_pkt_size << std::endl;
                 }
                 m_target_spacing /= 2;
@@ -628,7 +629,7 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
     {   
         m_curr_estimation = (float(m_curr_pkt_size) * 8.0 ) / (mb.m_local_pcap_mean / 1000000.0);
         done = true;
-        if (m_verbose)
+        if (m_verbose > 1)
             std::cout << "## done. setting current estimate to " << m_curr_estimation / 1000.0 << std::endl;
 
 #if 0 // needs fixing
@@ -652,6 +653,7 @@ void YazSender::resetRound(){
     m_target_spacing = MIN_SPACE;
     m_curr_pkt_size = _m_saved_pkt_size;
     _m_local_crawl = RETRY_LIMIT;
+    m_traffic_generated = 0;
 }
 
 

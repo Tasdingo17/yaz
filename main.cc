@@ -63,7 +63,7 @@ int main(int argc, char **argv)
     bool receiver = false;
     int min_pkt_size = 200;
     int init_pkt_size = 1500;
-    int init_spacing = MIN_SPACE;
+    int init_spacing = (MIN_SPACE + MAX_SPACE) / 2;
     int stream_length = 50;
     int n_streams = 1;
     int inter_stream_spacing = 50000;

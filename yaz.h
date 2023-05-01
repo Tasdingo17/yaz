@@ -70,10 +70,10 @@ static const int YAZTINYBUF = 32;
 static const int YAZPCAPSNAPLEN = 64;
 static const int YAZOSTIMINGSAMPLES = 100;
 
-static const int MIN_SPACE = 40;
+static const int MIN_SPACE = 20;
 static const int MAX_SPACE = 1000;
 
-static const int RETRY_LIMIT = 5;
+static const int RETRY_LIMIT = 10;
 
 static const unsigned short DEST_CTRL_PORT = 13979;
 static const unsigned short DEST_PORT   = 13989;
@@ -300,7 +300,8 @@ public:
                   m_stream_length(50), m_target_spacing(MIN_SPACE), 
                   m_max_pkt_spacing(MAX_SPACE), m_nstreams(1),
                   m_inter_stream_spacing(20000), m_curr_stream(0),
-                  m_resolution(1000000.0), m_curr_estimation(0)
+                  m_resolution(1000000.0), m_curr_estimation(0),
+                  m_traffic_generated(0)
         {
             memset(&m_target_addr, 0, sizeof(struct in_addr));
             inet_pton(AF_INET, "127.0.0.1", &m_target_addr);
@@ -394,14 +395,11 @@ public:
     void setInitialSpacing(int &i) { m_target_spacing = i; }
     void setInitialPktSize(int &i) { m_curr_pkt_size = i; }
 
-    float get_current_estimation() const{
-        return m_curr_estimation;
-    }
+    float get_current_estimation() const{ return m_curr_estimation;}
+    int get_current_pkt_size() const{ return m_curr_pkt_size; }
 
-
-    int get_current_pkt_size() const{
-        return m_curr_pkt_size;
-    }
+    // volume of generated traffic for last round, bits
+    unsigned int get_last_round_overhead() const {return m_traffic_generated; }
 
 
     std::unique_ptr<ABSender> clone() const{
@@ -438,7 +436,8 @@ private:
     int m_curr_stream;
     float m_resolution;
 
-    float m_curr_estimation;     // bytes/sec (?)
+    float m_curr_estimation;            // bytes/sec (?)
+    unsigned int m_traffic_generated;   // bytes, for last round
     int _m_max_space;
     int _m_fastest_local;
     int _m_saved_pkt_size;
