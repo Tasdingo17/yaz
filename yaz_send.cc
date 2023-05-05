@@ -593,14 +593,14 @@ bool YazSender::processOneRoundRes(std::list<MeasurementBundle> *mb_list){
         if (m_target_spacing == mb.m_remote_pcap_mean)
         {
             m_target_spacing += 2;
-            //_m_local_crawl--;
+            _m_local_crawl--;
         }
         else
         {
             float diff = fabs(mb.m_remote_pcap_mean - mb.m_local_pcap_mean);
             m_target_spacing = int(mb.m_local_pcap_mean + diff / 2);
         }
-        _m_local_crawl--;
+        //_m_local_crawl--;
 
         if (m_verbose > 2)
             std::cout << "new target: " << m_target_spacing << std::endl;

@@ -73,7 +73,7 @@ static const int YAZOSTIMINGSAMPLES = 100;
 static const int MIN_SPACE = 20;
 static const int MAX_SPACE = 1000;
 
-static const int RETRY_LIMIT = 10;
+static const int RETRY_LIMIT = 5;
 
 static const unsigned short DEST_CTRL_PORT = 13979;
 static const unsigned short DEST_PORT   = 13989;
@@ -399,7 +399,7 @@ public:
     int get_current_pkt_size() const{ return m_curr_pkt_size; }
 
     // volume of generated traffic for last round, bits
-    unsigned int get_last_round_overhead() const {return m_traffic_generated; }
+    unsigned int get_last_round_overhead() const override {return m_traffic_generated; }
 
 
     std::unique_ptr<ABSender> clone() const{
