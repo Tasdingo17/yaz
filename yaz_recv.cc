@@ -133,7 +133,7 @@ void YazReceiver::getConnection(int &csd, bool &connected)
     bool rv = false;
 
     pollfd pfd = {m_ctrl_sd, POLLIN, 0};
-    int n = poll(&pfd, 1, 1000);
+    int n = poll(&pfd, 1, 1000);    // TOCHECK: probably -1 on timeout
 
     if (n < 0)
     {
@@ -173,6 +173,7 @@ void YazReceiver::run()
     m_pcap_filter_string = ostr.str();
 #endif
 
+    int poll_timeout = m_high_accuracy ? 0 : -1;
     try
     {
         prepCtrl();
@@ -194,10 +195,9 @@ void YazReceiver::run()
 
             pollfd pfd[2];
             int npfd = 0;
+            memset(pfd, 0, sizeof(pollfd) * 2);
             while (connected)
             {
-                memset(pfd, 0, sizeof(pollfd) * 2);
-           
                 pfd[0].fd = csd;
                 pfd[0].events = POLLIN;
                 pfd[0].revents = 0;
@@ -207,7 +207,7 @@ void YazReceiver::run()
                 pfd[1].revents = 0;
 
                 npfd = 2;
-                int rv = poll(&pfd[0], npfd, 0);
+                int rv = poll(&pfd[0], npfd, poll_timeout);
                 if (rv == -1)
                 {
                     std::cerr << "error in poll(): " << errno << '/' << strerror(errno) << std::endl;

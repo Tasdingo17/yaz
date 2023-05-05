@@ -449,7 +449,7 @@ class YazReceiver : public ABReceiver,
                     public YazEndPt
 {
 public:    
-    YazReceiver(): YazEndPt() {}
+    YazReceiver(): YazEndPt(), m_high_accuracy(true) {}
     //virtual ~YazReceiver() {}
 
     virtual void run();
@@ -492,6 +492,10 @@ public:
     std::unique_ptr<ABReceiver> clone() const{
         return std::make_unique<YazReceiver>(*this);
     }
+
+    void setAccuracy(bool is_high_accuracy){
+        m_high_accuracy = is_high_accuracy;
+    }
 protected:
     virtual void prepCtrl();
     virtual void prepProbe();
@@ -501,6 +505,8 @@ private:
     void getConnection(int &, bool &);
     void processControlMessage(int, bool &);
     void processProbe();
+
+    bool m_high_accuracy;   // increase accuracy but cause high load on CPU
 };
 
 
